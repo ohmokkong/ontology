@@ -1,0 +1,130 @@
+@prefix : <http://example.org/diet#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+#################################################################
+# 클래스 정의
+#################################################################
+
+:DietConcept a owl:Class ;
+    rdfs:label "다이어트 개념"@ko .
+
+:Food a owl:Class ;
+    rdfs:subClassOf :DietConcept ;
+    rdfs:label "음식"@ko .
+
+:Exercise a owl:Class ;
+    rdfs:subClassOf :DietConcept ;
+    rdfs:label "운동"@ko .
+
+:Emotion a owl:Class ;
+    rdfs:subClassOf :DietConcept ;
+    rdfs:label "감정"@ko .
+
+:Goal a owl:Class ;
+    rdfs:subClassOf :DietConcept ;
+    rdfs:label "목표"@ko .
+
+:Habit a owl:Class ;
+    rdfs:subClassOf :DietConcept ;
+    rdfs:label "습관"@ko .
+
+#################################################################
+# 데이터 속성 정의
+#################################################################
+
+:hasCalorie a owl:DatatypeProperty ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "칼로리 정보"@ko .
+
+:hasMealTime a owl:DatatypeProperty ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:string ;
+    rdfs:label "식사 시간"@ko .
+
+:hasDuration a owl:DatatypeProperty ;
+    rdfs:domain :Exercise ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "운동 시간 (분)"@ko .
+
+:hasIntensity a owl:DatatypeProperty ;
+    rdfs:domain :Exercise ;
+    rdfs:range xsd:string ;
+    rdfs:label "운동 강도"@ko .
+
+:burnsCalories a owl:DatatypeProperty ;
+    rdfs:domain :Exercise ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "소모 칼로리"@ko .
+
+:emotionState a owl:DatatypeProperty ;
+    rdfs:domain :Emotion ;
+    rdfs:range xsd:string ;
+    rdfs:label "감정 상태"@ko .
+
+:emotionIntensity a owl:DatatypeProperty ;
+    rdfs:domain :Emotion ;
+    rdfs:range xsd:string ;
+    rdfs:label "감정 강도"@ko .
+
+:goalType a owl:DatatypeProperty ;
+    rdfs:domain :Goal ;
+    rdfs:range xsd:string ;
+    rdfs:label "목표 유형"@ko .
+
+:targetWeight a owl:DatatypeProperty ;
+    rdfs:domain :Goal ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "목표 체중"@ko .
+
+:habitFrequency a owl:DatatypeProperty ;
+    rdfs:domain :Habit ;
+    rdfs:range xsd:string ;
+    rdfs:label "습관 빈도"@ko .
+
+:isPositiveHabit a owl:DatatypeProperty ;
+    rdfs:domain :Habit ;
+    rdfs:range xsd:boolean ;
+    rdfs:label "긍정적인 습관 여부"@ko .
+
+#################################################################
+# 객체 속성 정의
+#################################################################
+
+:influencesAppetite a owl:ObjectProperty ;
+    rdfs:domain :Emotion ;
+    rdfs:range :Food ;
+    rdfs:label "식욕에 영향"@ko .
+
+:supportsGoal a owl:ObjectProperty ;
+    rdfs:domain :Exercise ;
+    rdfs:range :Goal ;
+    rdfs:label "목표를 지원"@ko .
+
+:affectsEmotion a owl:ObjectProperty ;
+    rdfs:domain :Habit ;
+    rdfs:range :Emotion ;
+    rdfs:label "감정에 영향"@ko .
+
+:hasHabit a owl:ObjectProperty ;
+    rdfs:domain :DietConcept ;
+    rdfs:range :Habit ;
+    rdfs:label "습관 포함"@ko .
+
+#################################################################
+# 사용자 개체 (Instance)
+#################################################################
+
+:youngjaeUser a :User ;
+    :gender "여성" ;
+    :age 32 ;
+    :currentWeight 65 ;
+    :targetWeight 60 ;
+    :exercisePreference "저강도" ;
+    :eatingHabit1 "아침 거름" ;
+    :eatingHabit2 "점심은 회사식당" ;
+    :eatingHabit3 "저녁은 늦게" .
+
