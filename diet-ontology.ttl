@@ -40,6 +40,21 @@
     rdfs:range xsd:decimal ;
     rdfs:label "칼로리 정보"@ko .
 
+:hasCarbohydrate a owl:DatatypeProperty ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "탄수화물(g)"@ko .
+
+:hasProtein a owl:DatatypeProperty ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "단백질(g)"@ko .
+
+:hasFat a owl:DatatypeProperty ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "지방(g)"@ko .
+
 :hasMealTime a owl:DatatypeProperty ;
     rdfs:domain :Food ;
     rdfs:range xsd:string ;
@@ -127,4 +142,3 @@
     :eatingHabit1 "아침 거름" ;
     :eatingHabit2 "점심은 회사식당" ;
     :eatingHabit3 "저녁은 늦게" .
-
