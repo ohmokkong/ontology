@@ -57,3 +57,4 @@ rdflib 기반 처리: Exercise 개체 생성 및 MET 지정
 운동 세션 계산 기능 추가: 활동 시나리오 입력 시 ExerciseSession·caloriesBurned 계산
 
 음식 섭취 온톨로지와 통합: Food, ExerciseSession 연결하여 netCalories 등 값 연산
+
