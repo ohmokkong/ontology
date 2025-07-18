@@ -238,6 +238,23 @@ class CacheCorruptedError(CacheError):
     pass
 
 
+# ==================== 검색 관련 예외 ====================
+
+class SearchError(IntegratedAPIError):
+    """검색 시스템 관련 오류."""
+    pass
+
+
+class SearchTimeoutError(SearchError):
+    """검색 시간 초과 오류."""
+    pass
+
+
+class BatchSearchError(SearchError):
+    """배치 검색 오류."""
+    pass
+
+
 # ==================== 사용자 인터페이스 관련 예외 ====================
 
 class UserInterfaceError(IntegratedAPIError):
