@@ -1,61 +1,66 @@
 """
 검색 매니저.
 
-캐시 기반 음식/운동 통합 검색 기능을 제공하며, 배치 검색, 검색 제안,
-네트워크 오류 시 재시도 로직 등의 고급 검색 기능을 포함합니다.
+음식과 운동을 통합 검색하는 비즈니스 로직을 제공합니다.
+캐시 기반 검색, 배치 검색, 검색 제안, 네트워크 오류 재시도 등의 기능을 포함합니다.
 """
 
 import time
-from typing import List, Dict, Optional, Any, Tuple, Set
-from datetime import datetime, timedelta
-from dataclasses import dataclass
+import asyncio
+from typing import List, Dict, Optional, Any, Tuple, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import difflib
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
-from cache_manager import CacheManager
 from food_api_client import FoodAPIClient
 from exercise_api_client import ExerciseAPIClient
+from cache_manager import CacheManager
 from integrated_models import FoodItem, NutritionInfo, ExerciseItem
 from exceptions import (
     SearchError, NetworkError, TimeoutError, NoSearchResultsError,
-    CacheError, IntegratedAPIError
+    CacheError, APIResponseError
 )
 
 
 @dataclass
 class SearchResult:
-    """검색 결과를 나타내는 데이터 클래스."""
+    """통합 검색 결과 데이터 클래스."""
     query: str
-    food_results: List[FoodItem]
-    exercise_results: List[ExerciseItem]
-    search_time: float
-    cache_hit: bool
-    suggestions: List[str]
+    search_type: str  # 'food', 'exercise', 'both'
+    foods: List[FoodItem]
+    exercises: List[ExerciseItem]
     total_results: int
-    
-    @property
-    def has_results(self) -> bool:
-        """검색 결과가 있는지 확인합니다."""
-        return len(self.food_results) > 0 or len(self.exercise_results) > 0
+    cache_hit: bool
+    search_time: float
+    timestamp: datetime
+
+
+@dataclass
+class SearchSuggestion:
+    """검색 제안 데이터 클래스."""
+    suggestion: str
+    type: str  # 'food', 'exercise'
+    confidence: float
+    reason: str
 
 
 @dataclass
 class BatchSearchResult:
-    """배치 검색 결과를 나타내는 데이터 클래스."""
-    queries: List[str]
+    """배치 검색 결과 데이터 클래스."""
+    total_queries: int
+    successful_searches: int
+    failed_searches: int
     results: Dict[str, SearchResult]
     total_time: float
-    success_count: int
-    failure_count: int
     cache_hit_rate: float
 
 
 class SearchManager:
     """
-    캐시 기반 음식/운동 통합 검색 매니저.
+    통합 검색 관리자.
     
-    음식과 운동 데이터를 효율적으로 검색하고, 캐싱을 통해 성능을 최적화하며,
-    배치 검색, 검색 제안, 네트워크 재시도 등의 고급 기능을 제공합니다.
+    음식과 운동을 통합 검색하고, 캐시를 활용하여 성능을 최적화하며,
+    배치 검색과 검색 제안 기능을 제공합니다.
     """
     
     def __init__(self, 
@@ -63,7 +68,7 @@ class SearchManager:
                  exercise_client: ExerciseAPIClient,
                  cache_manager: CacheManager,
                  max_workers: int = 5,
-                 suggestion_threshold: float = 0.6):
+                 suggestion_threshold: float = 0.7):
         """
         SearchManager 초기화.
         
@@ -72,48 +77,40 @@ class SearchManager:
             exercise_client: 운동 API 클라이언트
             cache_manager: 캐시 매니저
             max_workers: 병렬 처리 최대 워커 수
-            suggestion_threshold: 검색 제안 유사도 임계값
+            suggestion_threshold: 검색 제안 임계값
         """
         self.food_client = food_client
         self.exercise_client = exercise_client
-        self.cache = cache_manager
+        self.cache_manager = cache_manager
         self.max_workers = max_workers
         self.suggestion_threshold = suggestion_threshold
         
-        # 검색 설정
-        self.retry_count = 3
-        self.retry_delay = 1.0
-        self.network_timeout = 30.0
-        
-        # 검색 기록 (제안 기능용)
-        self.search_history: Set[str] = set()
-        self.popular_searches: Dict[str, int] = {}
-        
-        # 성능 통계
-        self.stats = {
+        # 검색 통계
+        self.search_stats = {
             "total_searches": 0,
             "cache_hits": 0,
             "api_calls": 0,
-            "average_response_time": 0.0,
-            "error_count": 0
+            "failed_searches": 0,
+            "average_response_time": 0.0
+        }
+        
+        # 검색 제안을 위한 인기 검색어 캐시
+        self.popular_searches = {
+            "food": {},
+            "exercise": {}
         }
         
         print("✓ 검색 매니저 초기화 완료")
         print(f"  - 최대 워커 수: {max_workers}")
         print(f"  - 제안 임계값: {suggestion_threshold}")
     
-    def search(self, query: str, 
-               search_food: bool = True, 
-               search_exercise: bool = True,
-               max_results: int = 10) -> SearchResult:
+    def search_food_with_cache(self, food_name: str, use_suggestions: bool = True) -> SearchResult:
         """
-        통합 검색을 수행합니다.
+        캐시를 활용한 음식 검색.
         
         Args:
-            query: 검색어
-            search_food: 음식 검색 여부
-            search_exercise: 운동 검색 여부
-            max_results: 최대 결과 수
+            food_name: 검색할 음식명
+            use_suggestions: 검색 제안 사용 여부
             
         Returns:
             SearchResult: 검색 결과
@@ -121,512 +118,483 @@ class SearchManager:
         Raises:
             SearchError: 검색 실패 시
         """
+        if not food_name or not food_name.strip():
+            raise SearchError("검색할 음식명을 입력해주세요")
+        
+        food_name = food_name.strip()
+        start_time = time.time()
+        
+        print(f"🔍 음식 검색 (캐시 활용): '{food_name}'")
+        
+        try:
+            # 1단계: 캐시에서 검색
+            cached_foods = self.cache_manager.get_cached_food(food_name)
+            cache_hit = cached_foods is not None
+            
+            if cache_hit:
+                print(f"  💾 캐시 히트: {len(cached_foods)}개 결과")
+                foods = cached_foods
+                self.search_stats["cache_hits"] += 1
+            else:
+                # 2단계: API 호출
+                print("  🌐 API 호출 중...")
+                foods = self._search_food_with_retry(food_name)
+                
+                # 3단계: 캐시에 저장
+                if foods:
+                    self.cache_manager.cache_food_result(food_name, foods)
+                    print(f"  💾 캐시 저장: {len(foods)}개 결과")
+                
+                self.search_stats["api_calls"] += 1
+            
+            # 4단계: 검색 통계 업데이트
+            search_time = time.time() - start_time
+            self._update_search_stats(search_time)
+            self._update_popular_searches("food", food_name)
+            
+            # 5단계: 결과 생성
+            result = SearchResult(
+                query=food_name,
+                search_type="food",
+                foods=foods,
+                exercises=[],
+                total_results=len(foods),
+                cache_hit=cache_hit,
+                search_time=search_time,
+                timestamp=datetime.now()
+            )
+            
+            print(f"✓ 음식 검색 완료: {len(foods)}개 결과 ({search_time:.2f}초)")
+            return result
+            
+        except Exception as e:
+            self.search_stats["failed_searches"] += 1
+            if isinstance(e, SearchError):
+                raise
+            raise SearchError(f"음식 검색 중 오류 발생: {str(e)}")
+    
+    def search_exercise_with_cache(self, exercise_name: str, category: Optional[str] = None) -> SearchResult:
+        """
+        캐시를 활용한 운동 검색.
+        
+        Args:
+            exercise_name: 검색할 운동명
+            category: 운동 분류 (선택사항)
+            
+        Returns:
+            SearchResult: 검색 결과
+            
+        Raises:
+            SearchError: 검색 실패 시
+        """
+        if not exercise_name or not exercise_name.strip():
+            raise SearchError("검색할 운동명을 입력해주세요")
+        
+        exercise_name = exercise_name.strip()
+        start_time = time.time()
+        
+        print(f"🏃 운동 검색 (캐시 활용): '{exercise_name}'")
+        
+        try:
+            # 캐시 키에 카테고리 포함
+            cache_key = f"{exercise_name}_{category}" if category else exercise_name
+            
+            # 1단계: 캐시에서 검색
+            cached_exercises = self.cache_manager.get_cached_exercise(cache_key)
+            cache_hit = cached_exercises is not None
+            
+            if cache_hit:
+                print(f"  💾 캐시 히트: {len(cached_exercises)}개 결과")
+                exercises = cached_exercises
+                self.search_stats["cache_hits"] += 1
+            else:
+                # 2단계: API 호출
+                print("  🌐 API 호출 중...")
+                exercises = self._search_exercise_with_retry(exercise_name, category)
+                
+                # 3단계: 캐시에 저장
+                if exercises:
+                    self.cache_manager.cache_exercise_result(cache_key, exercises)
+                    print(f"  💾 캐시 저장: {len(exercises)}개 결과")
+                
+                self.search_stats["api_calls"] += 1
+            
+            # 4단계: 검색 통계 업데이트
+            search_time = time.time() - start_time
+            self._update_search_stats(search_time)
+            self._update_popular_searches("exercise", exercise_name)
+            
+            # 5단계: 결과 생성
+            result = SearchResult(
+                query=exercise_name,
+                search_type="exercise",
+                foods=[],
+                exercises=exercises,
+                total_results=len(exercises),
+                cache_hit=cache_hit,
+                search_time=search_time,
+                timestamp=datetime.now()
+            )
+            
+            print(f"✓ 운동 검색 완료: {len(exercises)}개 결과 ({search_time:.2f}초)")
+            return result
+            
+        except Exception as e:
+            self.search_stats["failed_searches"] += 1
+            if isinstance(e, SearchError):
+                raise
+            raise SearchError(f"운동 검색 중 오류 발생: {str(e)}")
+    
+    def search_both(self, query: str) -> SearchResult:
+        """
+        음식과 운동을 동시에 검색합니다.
+        
+        Args:
+            query: 검색어
+            
+        Returns:
+            SearchResult: 통합 검색 결과
+        """
         if not query or not query.strip():
             raise SearchError("검색어를 입력해주세요")
         
         query = query.strip()
         start_time = time.time()
         
-        print(f"🔍 통합 검색: '{query}'")
+        print(f"🔍🏃 통합 검색: '{query}'")
         
         try:
-            # 검색 기록 업데이트
-            self._update_search_history(query)
-            
-            # 캐시에서 검색 시도
-            cached_result = self._search_from_cache(query, search_food, search_exercise)
-            if cached_result:
-                search_time = time.time() - start_time
-                self._update_stats(cache_hit=True, response_time=search_time)
-                
-                return SearchResult(
-                    query=query,
-                    food_results=cached_result.get('food', [])[:max_results],
-                    exercise_results=cached_result.get('exercise', [])[:max_results],
-                    search_time=search_time,
-                    cache_hit=True,
-                    suggestions=self._generate_suggestions(query),
-                    total_results=len(cached_result.get('food', [])) + len(cached_result.get('exercise', []))
-                )
-            
-            # API에서 검색
-            food_results = []
-            exercise_results = []
-            
-            # 병렬 검색 수행
+            # 병렬로 음식과 운동 검색 수행
             with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = []
+                # 음식 검색 작업 제출
+                food_future = executor.submit(self._safe_search_food, query)
                 
-                if search_food:
-                    futures.append(executor.submit(self._search_food_with_retry, query))
+                # 운동 검색 작업 제출
+                exercise_future = executor.submit(self._safe_search_exercise, query)
                 
-                if search_exercise:
-                    futures.append(executor.submit(self._search_exercise_with_retry, query))
-                
-                for future in as_completed(futures):
-                    try:
-                        result_type, results = future.result()
-                        if result_type == 'food':
-                            food_results = results[:max_results]
-                        elif result_type == 'exercise':
-                            exercise_results = results[:max_results]
-                    except Exception as e:
-                        print(f"  ⚠️ 병렬 검색 오류: {str(e)}")
-                        continue
+                # 결과 수집
+                foods = food_future.result()
+                exercises = exercise_future.result()
             
-            # 결과 캐싱
-            self._cache_search_results(query, food_results, exercise_results)
-            
+            # 검색 시간 계산
             search_time = time.time() - start_time
-            self._update_stats(cache_hit=False, response_time=search_time)
+            self._update_search_stats(search_time)
             
-            return SearchResult(
+            # 결과 생성
+            result = SearchResult(
                 query=query,
-                food_results=food_results,
-                exercise_results=exercise_results,
+                search_type="both",
+                foods=foods,
+                exercises=exercises,
+                total_results=len(foods) + len(exercises),
+                cache_hit=False,  # 통합 검색은 개별 캐시 히트 여부를 정확히 판단하기 어려움
                 search_time=search_time,
-                cache_hit=False,
-                suggestions=self._generate_suggestions(query),
-                total_results=len(food_results) + len(exercise_results)
+                timestamp=datetime.now()
             )
             
+            print(f"✓ 통합 검색 완료: 음식 {len(foods)}개, 운동 {len(exercises)}개 ({search_time:.2f}초)")
+            return result
+            
         except Exception as e:
-            self._update_stats(error=True)
-            if isinstance(e, SearchError):
-                raise
-            raise SearchError(f"검색 중 오류 발생: {str(e)}")
+            self.search_stats["failed_searches"] += 1
+            raise SearchError(f"통합 검색 중 오류 발생: {str(e)}")
     
-    def search_food_with_cache(self, food_name: str, max_results: int = 10) -> List[FoodItem]:
-        """
-        캐시 기반 음식 검색.
-        
-        Args:
-            food_name: 음식명
-            max_results: 최대 결과 수
-            
-        Returns:
-            List[FoodItem]: 검색된 음식 목록
-        """
-        print(f"🍽️ 음식 검색: '{food_name}'")
-        
-        # 캐시에서 먼저 확인
-        cached_foods = self.cache.get_cached_food(food_name)
-        if cached_foods:
-            print(f"  💾 캐시에서 {len(cached_foods)}개 음식 조회")
-            return cached_foods[:max_results]
-        
-        # API에서 검색
-        try:
-            foods = self.food_client.search_food(food_name, 1, max_results)
-            
-            # 캐시에 저장
-            if foods:
-                self.cache.cache_food_result(food_name, foods)
-                print(f"  🔄 {len(foods)}개 음식 캐시 저장")
-            
-            return foods
-            
-        except Exception as e:
-            print(f"  ❌ 음식 검색 실패: {str(e)}")
-            return []
-    
-    def search_exercise_with_cache(self, exercise_name: str, max_results: int = 10) -> List[ExerciseItem]:
-        """
-        캐시 기반 운동 검색.
-        
-        Args:
-            exercise_name: 운동명
-            max_results: 최대 결과 수
-            
-        Returns:
-            List[ExerciseItem]: 검색된 운동 목록
-        """
-        print(f"🏃 운동 검색: '{exercise_name}'")
-        
-        # 캐시에서 먼저 확인
-        cached_exercises = self.cache.get_cached_exercise(exercise_name)
-        if cached_exercises:
-            print(f"  💾 캐시에서 {len(cached_exercises)}개 운동 조회")
-            return cached_exercises[:max_results]
-        
-        # API에서 검색
-        try:
-            exercises = self.exercise_client.search_exercise(exercise_name)
-            
-            # 캐시에 저장
-            if exercises:
-                self.cache.cache_exercise_result(exercise_name, exercises)
-                print(f"  🔄 {len(exercises)}개 운동 캐시 저장")
-            
-            return exercises[:max_results]
-            
-        except Exception as e:
-            print(f"  ❌ 운동 검색 실패: {str(e)}")
-            return []   
- 
-    def batch_search_foods(self, food_names: List[str], max_results_per_item: int = 5) -> Dict[str, List[FoodItem]]:
+    def batch_search_foods(self, food_names: List[str], max_concurrent: Optional[int] = None) -> BatchSearchResult:
         """
         여러 음식을 배치로 검색합니다.
         
         Args:
             food_names: 검색할 음식명 목록
-            max_results_per_item: 항목당 최대 결과 수
-            
-        Returns:
-            Dict[str, List[FoodItem]]: 음식명별 검색 결과
-        """
-        print(f"📦 음식 배치 검색: {len(food_names)}개 항목")
-        
-        results = {}
-        
-        # 병렬 처리로 성능 향상
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 작업 제출
-            future_to_name = {
-                executor.submit(self.search_food_with_cache, name, max_results_per_item): name
-                for name in food_names
-            }
-            
-            # 결과 수집
-            for future in as_completed(future_to_name):
-                food_name = future_to_name[future]
-                try:
-                    food_results = future.result()
-                    results[food_name] = food_results
-                    print(f"  ✓ {food_name}: {len(food_results)}개 결과")
-                except Exception as e:
-                    print(f"  ✗ {food_name}: 검색 실패 - {str(e)}")
-                    results[food_name] = []
-        
-        return results
-    
-    def batch_search_exercises(self, exercise_names: List[str], max_results_per_item: int = 5) -> Dict[str, List[ExerciseItem]]:
-        """
-        여러 운동을 배치로 검색합니다.
-        
-        Args:
-            exercise_names: 검색할 운동명 목록
-            max_results_per_item: 항목당 최대 결과 수
-            
-        Returns:
-            Dict[str, List[ExerciseItem]]: 운동명별 검색 결과
-        """
-        print(f"📦 운동 배치 검색: {len(exercise_names)}개 항목")
-        
-        results = {}
-        
-        # 병렬 처리로 성능 향상
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 작업 제출
-            future_to_name = {
-                executor.submit(self.search_exercise_with_cache, name, max_results_per_item): name
-                for name in exercise_names
-            }
-            
-            # 결과 수집
-            for future in as_completed(future_to_name):
-                exercise_name = future_to_name[future]
-                try:
-                    exercise_results = future.result()
-                    results[exercise_name] = exercise_results
-                    print(f"  ✓ {exercise_name}: {len(exercise_results)}개 결과")
-                except Exception as e:
-                    print(f"  ✗ {exercise_name}: 검색 실패 - {str(e)}")
-                    results[exercise_name] = []
-        
-        return results
-    
-    def batch_search(self, queries: List[str], 
-                    search_food: bool = True, 
-                    search_exercise: bool = True,
-                    max_results_per_query: int = 5) -> BatchSearchResult:
-        """
-        여러 검색어를 배치로 처리합니다.
-        
-        Args:
-            queries: 검색어 목록
-            search_food: 음식 검색 여부
-            search_exercise: 운동 검색 여부
-            max_results_per_query: 검색어당 최대 결과 수
+            max_concurrent: 최대 동시 실행 수 (기본값: max_workers)
             
         Returns:
             BatchSearchResult: 배치 검색 결과
         """
-        print(f"📦 배치 검색: {len(queries)}개 검색어")
+        if not food_names:
+            raise SearchError("검색할 음식 목록이 비어있습니다")
         
+        max_concurrent = max_concurrent or self.max_workers
         start_time = time.time()
+        
+        print(f"📦 음식 배치 검색: {len(food_names)}개 (동시 실행: {max_concurrent})")
+        
         results = {}
-        success_count = 0
-        failure_count = 0
+        successful_searches = 0
+        failed_searches = 0
         cache_hits = 0
         
-        # 병렬 처리
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_query = {
-                executor.submit(
-                    self.search, 
-                    query, 
-                    search_food, 
-                    search_exercise, 
-                    max_results_per_query
-                ): query
-                for query in queries
-            }
+        try:
+            with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+                # 모든 검색 작업 제출
+                future_to_name = {
+                    executor.submit(self._safe_search_food_for_batch, name): name 
+                    for name in food_names
+                }
+                
+                # 결과 수집
+                for future in as_completed(future_to_name):
+                    food_name = future_to_name[future]
+                    try:
+                        search_result = future.result()
+                        results[food_name] = search_result
+                        successful_searches += 1
+                        
+                        if search_result.cache_hit:
+                            cache_hits += 1
+                            
+                        print(f"  ✓ {food_name}: {search_result.total_results}개 결과")
+                        
+                    except Exception as e:
+                        print(f"  ✗ {food_name}: {str(e)}")
+                        failed_searches += 1
+                        
+                        # 실패한 검색도 빈 결과로 기록
+                        results[food_name] = SearchResult(
+                            query=food_name,
+                            search_type="food",
+                            foods=[],
+                            exercises=[],
+                            total_results=0,
+                            cache_hit=False,
+                            search_time=0.0,
+                            timestamp=datetime.now()
+                        )
             
-            for future in as_completed(future_to_query):
-                query = future_to_query[future]
-                try:
-                    result = future.result()
-                    results[query] = result
-                    success_count += 1
-                    if result.cache_hit:
-                        cache_hits += 1
-                    print(f"  ✓ '{query}': {result.total_results}개 결과")
-                except Exception as e:
-                    print(f"  ✗ '{query}': 검색 실패 - {str(e)}")
-                    failure_count += 1
-                    results[query] = SearchResult(
-                        query=query,
-                        food_results=[],
-                        exercise_results=[],
-                        search_time=0.0,
-                        cache_hit=False,
-                        suggestions=[],
-                        total_results=0
-                    )
-        
-        total_time = time.time() - start_time
-        cache_hit_rate = (cache_hits / len(queries)) * 100 if queries else 0
-        
-        return BatchSearchResult(
-            queries=queries,
-            results=results,
-            total_time=total_time,
-            success_count=success_count,
-            failure_count=failure_count,
-            cache_hit_rate=cache_hit_rate
-        )
+            # 배치 검색 결과 생성
+            total_time = time.time() - start_time
+            cache_hit_rate = (cache_hits / len(food_names)) * 100 if food_names else 0
+            
+            batch_result = BatchSearchResult(
+                total_queries=len(food_names),
+                successful_searches=successful_searches,
+                failed_searches=failed_searches,
+                results=results,
+                total_time=total_time,
+                cache_hit_rate=cache_hit_rate
+            )
+            
+            print(f"✓ 배치 검색 완료: {successful_searches}/{len(food_names)} 성공 ({total_time:.2f}초)")
+            print(f"  캐시 히트율: {cache_hit_rate:.1f}%")
+            
+            return batch_result
+            
+        except Exception as e:
+            raise SearchError(f"배치 검색 중 오류 발생: {str(e)}")
     
-    def get_search_suggestions(self, partial_query: str, max_suggestions: int = 5) -> List[str]:
+    def get_search_suggestions(self, partial_query: str, search_type: str = "both") -> List[SearchSuggestion]:
         """
         부분 검색어를 기반으로 검색 제안을 생성합니다.
         
         Args:
             partial_query: 부분 검색어
-            max_suggestions: 최대 제안 수
+            search_type: 검색 타입 ('food', 'exercise', 'both')
             
         Returns:
-            List[str]: 검색 제안 목록
+            List[SearchSuggestion]: 검색 제안 목록
         """
-        if not partial_query or len(partial_query) < 2:
+        if not partial_query or len(partial_query.strip()) < 2:
             return []
         
+        partial_query = partial_query.strip().lower()
         suggestions = []
-        partial_query = partial_query.lower().strip()
         
-        # 검색 기록에서 유사한 검색어 찾기
-        for search_term in self.search_history:
-            if partial_query in search_term.lower():
-                suggestions.append(search_term)
+        print(f"💡 검색 제안 생성: '{partial_query}' (타입: {search_type})")
         
-        # 인기 검색어에서 유사한 검색어 찾기
-        for popular_term in sorted(self.popular_searches.keys(), 
-                                 key=lambda x: self.popular_searches[x], 
-                                 reverse=True):
-            if partial_query in popular_term.lower() and popular_term not in suggestions:
-                suggestions.append(popular_term)
-        
-        # 유사도 기반 제안 (difflib 사용)
-        all_terms = list(self.search_history) + list(self.popular_searches.keys())
-        similar_terms = difflib.get_close_matches(
-            partial_query, 
-            all_terms, 
-            n=max_suggestions, 
-            cutoff=self.suggestion_threshold
-        )
-        
-        for term in similar_terms:
-            if term not in suggestions:
-                suggestions.append(term)
-        
-        return suggestions[:max_suggestions]
+        try:
+            # 1. 인기 검색어 기반 제안
+            if search_type in ["food", "both"]:
+                food_suggestions = self._get_popular_search_suggestions(
+                    partial_query, "food"
+                )
+                suggestions.extend(food_suggestions)
+            
+            if search_type in ["exercise", "both"]:
+                exercise_suggestions = self._get_popular_search_suggestions(
+                    partial_query, "exercise"
+                )
+                suggestions.extend(exercise_suggestions)
+            
+            # 2. 기본 데이터베이스 기반 제안
+            if search_type in ["exercise", "both"]:
+                exercise_db_suggestions = self._get_exercise_db_suggestions(partial_query)
+                suggestions.extend(exercise_db_suggestions)
+            
+            # 3. 제안 정렬 및 필터링
+            suggestions = self._filter_and_sort_suggestions(suggestions)
+            
+            print(f"✓ {len(suggestions)}개 검색 제안 생성")
+            return suggestions[:10]  # 최대 10개까지
+            
+        except Exception as e:
+            print(f"⚠️ 검색 제안 생성 실패: {str(e)}")
+            return []
     
-    def _search_from_cache(self, query: str, search_food: bool, search_exercise: bool) -> Optional[Dict[str, List]]:
-        """캐시에서 검색 결과를 조회합니다."""
-        cached_result = {}
-        cache_found = False
-        
-        if search_food:
-            cached_foods = self.cache.get_cached_food(query)
-            if cached_foods:
-                cached_result['food'] = cached_foods
-                cache_found = True
-        
-        if search_exercise:
-            cached_exercises = self.cache.get_cached_exercise(query)
-            if cached_exercises:
-                cached_result['exercise'] = cached_exercises
-                cache_found = True
-        
-        return cached_result if cache_found else None
-    
-    def _search_food_with_retry(self, query: str) -> Tuple[str, List[FoodItem]]:
+    def _search_food_with_retry(self, food_name: str, max_retries: int = 3) -> List[FoodItem]:
         """재시도 로직을 포함한 음식 검색."""
         last_exception = None
         
-        for attempt in range(self.retry_count):
+        for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    print(f"    음식 검색 재시도 {attempt}/{self.retry_count - 1}")
-                    time.sleep(self.retry_delay * attempt)
+                    print(f"    재시도 {attempt}/{max_retries - 1}")
+                    time.sleep(1.0 * attempt)  # 지수 백오프
                 
-                results = self.food_client.search_food(query)
-                return ('food', results)
+                return self.food_client.search_food(food_name)
                 
-            except NetworkError as e:
-                last_exception = e
-                continue
-            except TimeoutError as e:
-                last_exception = e
-                continue
             except NoSearchResultsError:
                 # 검색 결과 없음은 재시도하지 않음
-                return ('food', [])
+                return []
+            except (NetworkError, TimeoutError) as e:
+                last_exception = e
+                print(f"    네트워크 오류, 재시도 예정: {str(e)}")
+                continue
             except Exception as e:
                 last_exception = e
                 break
         
-        print(f"    음식 검색 최종 실패: {str(last_exception)}")
-        return ('food', [])
+        # 모든 재시도 실패
+        if last_exception:
+            raise last_exception
+        return []
     
-    def _search_exercise_with_retry(self, query: str) -> Tuple[str, List[ExerciseItem]]:
+    def _search_exercise_with_retry(self, exercise_name: str, category: Optional[str] = None, max_retries: int = 3) -> List[ExerciseItem]:
         """재시도 로직을 포함한 운동 검색."""
         last_exception = None
         
-        for attempt in range(self.retry_count):
+        for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    print(f"    운동 검색 재시도 {attempt}/{self.retry_count - 1}")
-                    time.sleep(self.retry_delay * attempt)
+                    print(f"    재시도 {attempt}/{max_retries - 1}")
+                    time.sleep(1.0 * attempt)  # 지수 백오프
                 
-                results = self.exercise_client.search_exercise(query)
-                return ('exercise', results)
+                return self.exercise_client.search_exercise(exercise_name, category)
                 
-            except NetworkError as e:
-                last_exception = e
-                continue
-            except TimeoutError as e:
-                last_exception = e
-                continue
             except NoSearchResultsError:
                 # 검색 결과 없음은 재시도하지 않음
-                return ('exercise', [])
+                return []
+            except (NetworkError, TimeoutError) as e:
+                last_exception = e
+                print(f"    네트워크 오류, 재시도 예정: {str(e)}")
+                continue
             except Exception as e:
                 last_exception = e
                 break
         
-        print(f"    운동 검색 최종 실패: {str(last_exception)}")
-        return ('exercise', [])
+        # 모든 재시도 실패
+        if last_exception:
+            raise last_exception
+        return []
     
-    def _cache_search_results(self, query: str, food_results: List[FoodItem], exercise_results: List[ExerciseItem]) -> None:
-        """검색 결과를 캐시에 저장합니다."""
+    def _safe_search_food(self, food_name: str) -> List[FoodItem]:
+        """안전한 음식 검색 (예외를 빈 리스트로 변환)."""
         try:
-            if food_results:
-                self.cache.cache_food_result(query, food_results)
-            
-            if exercise_results:
-                self.cache.cache_exercise_result(query, exercise_results)
-                
+            result = self.search_food_with_cache(food_name)
+            return result.foods
         except Exception as e:
-            print(f"  ⚠️ 캐시 저장 실패: {str(e)}")
+            print(f"    음식 검색 실패: {str(e)}")
+            return []
     
-    def _update_search_history(self, query: str) -> None:
-        """검색 기록을 업데이트합니다."""
-        self.search_history.add(query)
-        
-        # 인기 검색어 카운트 업데이트
-        if query in self.popular_searches:
-            self.popular_searches[query] += 1
-        else:
-            self.popular_searches[query] = 1
-        
-        # 검색 기록 크기 제한 (메모리 관리)
-        if len(self.search_history) > 1000:
-            # 오래된 검색어 일부 제거
-            old_terms = list(self.search_history)[:100]
-            for term in old_terms:
-                self.search_history.discard(term)
+    def _safe_search_exercise(self, exercise_name: str) -> List[ExerciseItem]:
+        """안전한 운동 검색 (예외를 빈 리스트로 변환)."""
+        try:
+            result = self.search_exercise_with_cache(exercise_name)
+            return result.exercises
+        except Exception as e:
+            print(f"    운동 검색 실패: {str(e)}")
+            return []
     
-    def _generate_suggestions(self, query: str) -> List[str]:
-        """검색어 기반 제안을 생성합니다."""
-        suggestions = []
-        
-        # 유사한 검색어 찾기
-        similar_queries = self.get_search_suggestions(query, 3)
-        suggestions.extend(similar_queries)
-        
-        # 관련 키워드 제안
-        related_keywords = self._get_related_keywords(query)
-        suggestions.extend(related_keywords)
-        
-        # 중복 제거 및 원본 검색어 제외
-        unique_suggestions = []
-        for suggestion in suggestions:
-            if suggestion != query and suggestion not in unique_suggestions:
-                unique_suggestions.append(suggestion)
-        
-        return unique_suggestions[:5]
+    def _safe_search_food_for_batch(self, food_name: str) -> SearchResult:
+        """배치 검색용 안전한 음식 검색."""
+        try:
+            return self.search_food_with_cache(food_name)
+        except Exception as e:
+            raise SearchError(f"'{food_name}' 검색 실패: {str(e)}")
     
-    def _get_related_keywords(self, query: str) -> List[str]:
-        """관련 키워드를 생성합니다."""
-        related = []
-        query_lower = query.lower()
-        
-        # 음식 관련 키워드
-        food_keywords = {
-            "밥": ["백미밥", "현미밥", "볶음밥"],
-            "면": ["라면", "우동", "파스타"],
-            "고기": ["소고기", "돼지고기", "닭고기"],
-            "생선": ["연어", "고등어", "참치"],
-            "야채": ["브로콜리", "시금치", "당근"],
-            "과일": ["사과", "바나나", "오렌지"]
-        }
-        
-        # 운동 관련 키워드
-        exercise_keywords = {
-            "달리기": ["조깅", "마라톤", "트레드밀"],
-            "걷기": ["산책", "빠른걷기", "파워워킹"],
-            "운동": ["헬스", "피트니스", "체조"],
-            "수영": ["자유형", "배영", "접영"],
-            "자전거": ["사이클링", "실내자전거", "로드바이크"]
-        }
-        
-        # 관련 키워드 찾기
-        for keyword, related_list in {**food_keywords, **exercise_keywords}.items():
-            if keyword in query_lower:
-                related.extend(related_list)
-        
-        return related[:3]
-    
-    def _update_stats(self, cache_hit: bool = False, response_time: float = 0.0, error: bool = False) -> None:
+    def _update_search_stats(self, search_time: float) -> None:
         """검색 통계를 업데이트합니다."""
-        self.stats["total_searches"] += 1
-        
-        if cache_hit:
-            self.stats["cache_hits"] += 1
-        else:
-            self.stats["api_calls"] += 1
-        
-        if error:
-            self.stats["error_count"] += 1
+        self.search_stats["total_searches"] += 1
         
         # 평균 응답 시간 계산
-        if response_time > 0:
-            current_avg = self.stats["average_response_time"]
-            total_searches = self.stats["total_searches"]
-            self.stats["average_response_time"] = (
-                (current_avg * (total_searches - 1) + response_time) / total_searches
-            )
+        total_time = (self.search_stats["average_response_time"] * 
+                     (self.search_stats["total_searches"] - 1) + search_time)
+        self.search_stats["average_response_time"] = total_time / self.search_stats["total_searches"]
+    
+    def _update_popular_searches(self, search_type: str, query: str) -> None:
+        """인기 검색어를 업데이트합니다."""
+        if search_type not in self.popular_searches:
+            return
+        
+        query_lower = query.lower()
+        if query_lower in self.popular_searches[search_type]:
+            self.popular_searches[search_type][query_lower] += 1
+        else:
+            self.popular_searches[search_type][query_lower] = 1
+    
+    def _get_popular_search_suggestions(self, partial_query: str, search_type: str) -> List[SearchSuggestion]:
+        """인기 검색어 기반 제안을 생성합니다."""
+        suggestions = []
+        
+        if search_type not in self.popular_searches:
+            return suggestions
+        
+        for query, count in self.popular_searches[search_type].items():
+            if partial_query in query and len(query) > len(partial_query):
+                confidence = min(count / 10.0, 1.0)  # 최대 1.0
+                if confidence >= self.suggestion_threshold:
+                    suggestions.append(SearchSuggestion(
+                        suggestion=query,
+                        type=search_type,
+                        confidence=confidence,
+                        reason=f"인기 검색어 (검색 {count}회)"
+                    ))
+        
+        return suggestions
+    
+    def _get_exercise_db_suggestions(self, partial_query: str) -> List[SearchSuggestion]:
+        """운동 데이터베이스 기반 제안을 생성합니다."""
+        suggestions = []
+        
+        # 운동 클라이언트의 지원 운동 목록 활용
+        try:
+            supported_exercises = self.exercise_client.get_supported_exercises()
+            
+            for exercise_name in supported_exercises.keys():
+                exercise_lower = exercise_name.lower()
+                if partial_query in exercise_lower and len(exercise_name) > len(partial_query):
+                    # 매칭 정도에 따른 신뢰도 계산
+                    if exercise_lower.startswith(partial_query):
+                        confidence = 0.9  # 시작 매칭
+                    elif partial_query in exercise_lower[:len(exercise_lower)//2]:
+                        confidence = 0.8  # 앞부분 매칭
+                    else:
+                        confidence = 0.7  # 일반 매칭
+                    
+                    suggestions.append(SearchSuggestion(
+                        suggestion=exercise_name,
+                        type="exercise",
+                        confidence=confidence,
+                        reason="지원 운동 목록"
+                    ))
+        
+        except Exception as e:
+            print(f"    운동 DB 제안 생성 실패: {str(e)}")
+        
+        return suggestions
+    
+    def _filter_and_sort_suggestions(self, suggestions: List[SearchSuggestion]) -> List[SearchSuggestion]:
+        """제안을 필터링하고 정렬합니다."""
+        # 중복 제거
+        unique_suggestions = {}
+        for suggestion in suggestions:
+            key = f"{suggestion.suggestion}_{suggestion.type}"
+            if key not in unique_suggestions or suggestion.confidence > unique_suggestions[key].confidence:
+                unique_suggestions[key] = suggestion
+        
+        # 신뢰도 기준으로 정렬
+        filtered_suggestions = list(unique_suggestions.values())
+        filtered_suggestions.sort(key=lambda x: x.confidence, reverse=True)
+        
+        return filtered_suggestions
     
     def get_search_stats(self) -> Dict[str, Any]:
         """
@@ -635,30 +603,43 @@ class SearchManager:
         Returns:
             Dict[str, Any]: 검색 통계 정보
         """
-        cache_hit_rate = 0.0
-        if self.stats["total_searches"] > 0:
-            cache_hit_rate = (self.stats["cache_hits"] / self.stats["total_searches"]) * 100
+        cache_stats = self.cache_manager.get_cache_stats()
         
         return {
-            "total_searches": self.stats["total_searches"],
-            "cache_hits": self.stats["cache_hits"],
-            "api_calls": self.stats["api_calls"],
-            "cache_hit_rate": cache_hit_rate,
-            "average_response_time": self.stats["average_response_time"],
-            "error_count": self.stats["error_count"],
-            "search_history_size": len(self.search_history),
-            "popular_searches": dict(sorted(
-                self.popular_searches.items(), 
-                key=lambda x: x[1], 
-                reverse=True
-            )[:10])
+            "search_statistics": self.search_stats.copy(),
+            "cache_statistics": {
+                "hit_rate": cache_stats.hit_rate,
+                "total_requests": cache_stats.total_requests,
+                "cache_hits": cache_stats.cache_hits,
+                "cache_misses": cache_stats.cache_misses
+            },
+            "popular_searches": {
+                "food_count": len(self.popular_searches["food"]),
+                "exercise_count": len(self.popular_searches["exercise"]),
+                "top_food_searches": self._get_top_searches("food", 5),
+                "top_exercise_searches": self._get_top_searches("exercise", 5)
+            },
+            "configuration": {
+                "max_workers": self.max_workers,
+                "suggestion_threshold": self.suggestion_threshold
+            }
         }
     
-    def clear_search_history(self) -> None:
-        """검색 기록을 초기화합니다."""
-        self.search_history.clear()
-        self.popular_searches.clear()
-        print("✓ 검색 기록 초기화 완료")
+    def _get_top_searches(self, search_type: str, limit: int = 5) -> List[Tuple[str, int]]:
+        """상위 검색어를 반환합니다."""
+        if search_type not in self.popular_searches:
+            return []
+        
+        searches = self.popular_searches[search_type]
+        sorted_searches = sorted(searches.items(), key=lambda x: x[1], reverse=True)
+        return sorted_searches[:limit]
+    
+    def clear_search_cache(self) -> None:
+        """검색 캐시를 정리합니다."""
+        print("🧹 검색 캐시 정리")
+        self.cache_manager.clear_all_cache()
+        self.popular_searches = {"food": {}, "exercise": {}}
+        print("✓ 검색 캐시 정리 완료")
     
     def optimize_search_performance(self) -> Dict[str, Any]:
         """
@@ -670,28 +651,22 @@ class SearchManager:
         print("⚡ 검색 성능 최적화 시작")
         
         # 캐시 최적화
-        cache_optimization = self.cache.optimize_cache()
+        cache_optimization = self.cache_manager.optimize_cache()
         
-        # 검색 기록 정리
-        history_before = len(self.search_history)
-        if history_before > 500:
-            # 인기도가 낮은 검색어 제거
-            low_popularity_terms = [
-                term for term, count in self.popular_searches.items() 
-                if count == 1
-            ]
-            for term in low_popularity_terms[:100]:
-                self.search_history.discard(term)
-                del self.popular_searches[term]
+        # 인기 검색어 정리 (상위 100개만 유지)
+        for search_type in ["food", "exercise"]:
+            if len(self.popular_searches[search_type]) > 100:
+                top_searches = dict(self._get_top_searches(search_type, 100))
+                self.popular_searches[search_type] = top_searches
         
-        history_after = len(self.search_history)
-        
-        result = {
+        optimization_result = {
             "cache_optimization": cache_optimization,
-            "search_history_cleaned": history_before - history_after,
-            "current_history_size": history_after,
-            "popular_searches_count": len(self.popular_searches)
+            "popular_searches_trimmed": {
+                "food": len(self.popular_searches["food"]),
+                "exercise": len(self.popular_searches["exercise"])
+            },
+            "timestamp": datetime.now().isoformat()
         }
         
-        print(f"✓ 검색 성능 최적화 완료: {result}")
-        return result
+        print(f"✓ 검색 성능 최적화 완료: {optimization_result}")
+        return optimization_result
