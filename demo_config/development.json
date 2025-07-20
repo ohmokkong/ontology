@@ -1,0 +1,14 @@
+{
+  "api": {
+    "default": {
+      "timeout": 10,
+      "retry_count": 1
+    }
+  },
+  "logging": {
+    "level": "DEBUG"
+  },
+  "features": {
+    "debug_mode": true
+  }
+}

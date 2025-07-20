@@ -1,0 +1,72 @@
+{
+  "api": {
+    "default": {
+      "timeout": 10,
+      "retry_count": 1,
+      "retry_delay": 1.0,
+      "max_concurrent_requests": 10
+    },
+    "food": {
+      "base_url": "https://apis.data.go.kr/1471000/FoodNtrIrdntInfoService1",
+      "key": "env-override-key",
+      "endpoints": {
+        "search": "/getFoodNtrItdntList1",
+        "detail": "/getFoodNtrItdntList1"
+      },
+      "params": {
+        "serviceKey": "{key}",
+        "type": "json",
+        "numOfRows": 100,
+        "pageNo": 1
+      }
+    },
+    "exercise": {
+      "base_url": "https://apis.data.go.kr/B551011/KorService1",
+      "key": "YOUR_EXERCISE_API_KEY",
+      "endpoints": {
+        "search": "/searchKeyword1",
+        "detail": "/detailCommon1"
+      },
+      "params": {
+        "serviceKey": "{key}",
+        "MobileOS": "ETC",
+        "MobileApp": "DietApp",
+        "_type": "json",
+        "numOfRows": 100,
+        "pageNo": 1
+      }
+    },
+    "timeout": 60
+  },
+  "cache": {
+    "enabled": true,
+    "ttl": 3600,
+    "max_size": 1000,
+    "cleanup_interval": 300
+  },
+  "database": {
+    "type": "sqlite",
+    "path": "data/diet_app.db",
+    "pool_size": 5,
+    "timeout": 30
+  },
+  "logging": {
+    "level": "DEBUG",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": "logs/app.log",
+    "max_size": "10MB",
+    "backup_count": 5
+  },
+  "ontology": {
+    "base_file": "diet-ontology.ttl",
+    "output_dir": "ontology_output",
+    "backup_enabled": true,
+    "validation_enabled": true
+  },
+  "features": {
+    "auto_backup": true,
+    "schema_validation": true,
+    "performance_monitoring": true,
+    "debug_mode": true
+  }
+}
