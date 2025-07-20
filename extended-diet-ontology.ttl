@@ -1,0 +1,293 @@
+@prefix : <http://example.org/diet#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+:METValue a owl:Class ;
+    rdfs:label "MET 값"@ko ;
+    rdfs:comment "운동의 대사당량 정보"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:Manufacturer a owl:Class ;
+    rdfs:label "제조사"@ko ;
+    rdfs:comment "음식 제조업체 정보"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:affectsEmotion a owl:ObjectProperty ;
+    rdfs:label "감정에 영향"@ko ;
+    rdfs:domain :Habit ;
+    rdfs:range :Emotion .
+
+:belongsToCategory a owl:ObjectProperty ;
+    rdfs:label "카테고리 소속"@ko ;
+    rdfs:comment "음식이 속하는 카테고리"@ko ;
+    rdfs:domain :FoodItem ;
+    rdfs:range :FoodCategory .
+
+:burnsCalories a owl:DatatypeProperty ;
+    rdfs:label "소모 칼로리"@ko ;
+    rdfs:domain :Exercise ;
+    rdfs:range xsd:decimal .
+
+:caloriesBurned a owl:DatatypeProperty ;
+    rdfs:label "소모 칼로리"@ko ;
+    rdfs:comment "운동으로 소모된 칼로리 (kcal)"@ko ;
+    rdfs:domain :ExerciseSession ;
+    rdfs:range xsd:decimal .
+
+:consumedFood a owl:ObjectProperty ;
+    rdfs:label "섭취한 음식"@ko ;
+    rdfs:comment "섭취 기록이 참조하는 음식"@ko ;
+    rdfs:domain :FoodConsumption ;
+    rdfs:range :FoodItem .
+
+:emotionIntensity a owl:DatatypeProperty ;
+    rdfs:label "감정 강도"@ko ;
+    rdfs:domain :Emotion ;
+    rdfs:range xsd:string .
+
+:emotionState a owl:DatatypeProperty ;
+    rdfs:label "감정 상태"@ko ;
+    rdfs:domain :Emotion ;
+    rdfs:range xsd:string .
+
+:goalType a owl:DatatypeProperty ;
+    rdfs:label "목표 유형"@ko ;
+    rdfs:domain :Goal ;
+    rdfs:range xsd:string .
+
+:habitFrequency a owl:DatatypeProperty ;
+    rdfs:label "습관 빈도"@ko ;
+    rdfs:domain :Habit ;
+    rdfs:range xsd:string .
+
+:hasAmount a owl:DatatypeProperty ;
+    rdfs:label "섭취량"@ko ;
+    rdfs:comment "실제 섭취한 양 (g)"@ko ;
+    rdfs:domain :FoodConsumption ;
+    rdfs:range xsd:decimal .
+
+:hasCalorie a owl:DatatypeProperty ;
+    rdfs:label "칼로리 정보"@ko ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:decimal .
+
+:hasCaloriesPer100g a owl:DatatypeProperty ;
+    rdfs:label "100g당 칼로리"@ko ;
+    rdfs:comment "100g당 칼로리 (kcal)"@ko ;
+    rdfs:domain :NutritionInfo ;
+    rdfs:range xsd:decimal .
+
+:hasCarbohydrate a owl:DatatypeProperty ;
+    rdfs:label "탄수화물(g)"@ko ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:decimal .
+
+:hasConsumedCalories a owl:DatatypeProperty ;
+    rdfs:label "섭취 칼로리"@ko ;
+    rdfs:comment "실제 섭취한 칼로리 (kcal)"@ko ;
+    rdfs:domain :FoodConsumption ;
+    rdfs:range xsd:decimal .
+
+:hasConsumedTime a owl:DatatypeProperty ;
+    rdfs:label "섭취 시간"@ko ;
+    rdfs:comment "음식을 섭취한 시간"@ko ;
+    rdfs:domain :FoodConsumption ;
+    rdfs:range xsd:dateTime .
+
+:hasDescription a owl:DatatypeProperty ;
+    rdfs:label "운동 설명"@ko ;
+    rdfs:comment "운동에 대한 상세 설명"@ko ;
+    rdfs:domain :ExerciseItem ;
+    rdfs:range xsd:string .
+
+:hasDuration a owl:DatatypeProperty ;
+    rdfs:label "운동 시간 (분)"@ko ;
+    rdfs:domain :Exercise ;
+    rdfs:range xsd:decimal .
+
+:hasExerciseCategory a owl:ObjectProperty ;
+    rdfs:label "운동 카테고리"@ko ;
+    rdfs:comment "운동이 속하는 카테고리"@ko ;
+    rdfs:domain :ExerciseItem ;
+    rdfs:range :ExerciseCategory .
+
+:hasExerciseDuration a owl:DatatypeProperty ;
+    rdfs:label "운동 시간"@ko ;
+    rdfs:comment "실제 운동 수행 시간 (분)"@ko ;
+    rdfs:domain :ExerciseSession ;
+    rdfs:range xsd:decimal .
+
+:hasExerciseId a owl:DatatypeProperty ;
+    rdfs:label "운동 ID"@ko ;
+    rdfs:comment "API에서 제공하는 운동 고유 식별자"@ko ;
+    rdfs:domain :ExerciseItem ;
+    rdfs:range xsd:string .
+
+:hasExerciseTime a owl:DatatypeProperty ;
+    rdfs:label "운동 시간"@ko ;
+    rdfs:comment "운동을 수행한 시간"@ko ;
+    rdfs:domain :ExerciseSession ;
+    rdfs:range xsd:dateTime .
+
+:hasFat a owl:DatatypeProperty ;
+    rdfs:label "지방(g)"@ko ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:decimal .
+
+:hasFiber a owl:DatatypeProperty ;
+    rdfs:label "식이섬유"@ko ;
+    rdfs:comment "식이섬유 함량 (g)"@ko ;
+    rdfs:domain :NutritionInfo ;
+    rdfs:range xsd:decimal .
+
+:hasFoodId a owl:DatatypeProperty ;
+    rdfs:label "음식 ID"@ko ;
+    rdfs:comment "API에서 제공하는 음식 고유 식별자"@ko ;
+    rdfs:domain :FoodItem ;
+    rdfs:range xsd:string .
+
+:hasHabit a owl:ObjectProperty ;
+    rdfs:label "습관 포함"@ko ;
+    rdfs:domain :DietConcept ;
+    rdfs:range :Habit .
+
+:hasIntensity a owl:DatatypeProperty ;
+    rdfs:label "운동 강도"@ko ;
+    rdfs:domain :Exercise ;
+    rdfs:range xsd:string .
+
+:hasMET a owl:DatatypeProperty ;
+    rdfs:label "MET 값"@ko ;
+    rdfs:comment "운동의 대사당량"@ko ;
+    rdfs:domain :ExerciseItem ;
+    rdfs:range xsd:decimal .
+
+:hasMealTime a owl:DatatypeProperty ;
+    rdfs:label "식사 시간"@ko ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:string .
+
+:hasNutritionInfo a owl:ObjectProperty ;
+    rdfs:label "영양 정보 포함"@ko ;
+    rdfs:comment "음식이 포함하는 영양 정보"@ko ;
+    rdfs:domain :FoodItem ;
+    rdfs:range :NutritionInfo .
+
+:hasProtein a owl:DatatypeProperty ;
+    rdfs:label "단백질(g)"@ko ;
+    rdfs:domain :Food ;
+    rdfs:range xsd:decimal .
+
+:hasServingSize a owl:DatatypeProperty ;
+    rdfs:label "1회 제공량"@ko ;
+    rdfs:comment "음식의 1회 제공량 (g)"@ko ;
+    rdfs:domain :FoodItem ;
+    rdfs:range xsd:decimal .
+
+:hasSodium a owl:DatatypeProperty ;
+    rdfs:label "나트륨"@ko ;
+    rdfs:comment "나트륨 함량 (mg)"@ko ;
+    rdfs:domain :NutritionInfo ;
+    rdfs:range xsd:decimal .
+
+:hasWeight a owl:DatatypeProperty ;
+    rdfs:label "체중"@ko ;
+    rdfs:comment "운동 수행자의 체중 (kg)"@ko ;
+    rdfs:domain :ExerciseSession ;
+    rdfs:range xsd:decimal .
+
+:influencesAppetite a owl:ObjectProperty ;
+    rdfs:label "식욕에 영향"@ko ;
+    rdfs:domain :Emotion ;
+    rdfs:range :Food .
+
+:isPositiveHabit a owl:DatatypeProperty ;
+    rdfs:label "긍정적인 습관 여부"@ko ;
+    rdfs:domain :Habit ;
+    rdfs:range xsd:boolean .
+
+:performedExercise a owl:ObjectProperty ;
+    rdfs:label "수행한 운동"@ko ;
+    rdfs:comment "운동 세션에서 수행한 운동"@ko ;
+    rdfs:domain :ExerciseSession ;
+    rdfs:range :ExerciseItem .
+
+:supportsGoal a owl:ObjectProperty ;
+    rdfs:label "목표를 지원"@ko ;
+    rdfs:domain :Exercise ;
+    rdfs:range :Goal .
+
+:targetWeight a owl:DatatypeProperty ;
+    rdfs:label "목표 체중"@ko ;
+    rdfs:domain :Goal ;
+    rdfs:range xsd:decimal .
+
+:youngjaeUser a :User ;
+    :age 32 ;
+    :currentWeight 65 ;
+    :eatingHabit1 "아침 거름" ;
+    :eatingHabit2 "점심은 회사식당" ;
+    :eatingHabit3 "저녁은 늦게" ;
+    :exercisePreference "저강도" ;
+    :gender "여성" ;
+    :targetWeight 60 .
+
+:ExerciseCategory a owl:Class ;
+    rdfs:label "운동 카테고리"@ko ;
+    rdfs:comment "운동의 분류 카테고리"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:FoodCategory a owl:Class ;
+    rdfs:label "음식 카테고리"@ko ;
+    rdfs:comment "음식의 분류 카테고리"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:Goal a owl:Class ;
+    rdfs:label "목표"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:Emotion a owl:Class ;
+    rdfs:label "감정"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:FoodConsumption a owl:Class ;
+    rdfs:label "음식 섭취"@ko ;
+    rdfs:comment "특정 시점의 음식 섭취 기록"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:Habit a owl:Class ;
+    rdfs:label "습관"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:NutritionInfo a owl:Class ;
+    rdfs:label "영양 정보"@ko ;
+    rdfs:comment "음식의 영양성분 정보"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:Exercise a owl:Class ;
+    rdfs:label "운동"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:ExerciseItem a owl:Class ;
+    rdfs:label "운동 아이템"@ko ;
+    rdfs:comment "API에서 조회된 개별 운동 아이템"@ko ;
+    rdfs:subClassOf :Exercise .
+
+:ExerciseSession a owl:Class ;
+    rdfs:label "운동 세션"@ko ;
+    rdfs:comment "특정 시점의 운동 수행 기록"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:FoodItem a owl:Class ;
+    rdfs:label "음식 아이템"@ko ;
+    rdfs:comment "API에서 조회된 개별 음식 아이템"@ko ;
+    rdfs:subClassOf :Food .
+
+:Food a owl:Class ;
+    rdfs:label "음식"@ko ;
+    rdfs:subClassOf :DietConcept .
+
+:DietConcept a owl:Class ;
+    rdfs:label "다이어트 개념"@ko .
+
