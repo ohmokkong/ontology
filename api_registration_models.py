@@ -42,11 +42,7 @@ class ConnectionStatus(Enum):
     UNKNOWN = "unknown"
 
 
-class ValidationResult(Enum):
-    """검증 결과 열거형"""
-    VALID = "valid"
-    INVALID = "invalid"
-    WARNING = "warning"
+# ValidationResult는 아래에 dataclass로 정의됨
 
 
 # ==================== 기본 데이터 모델 ====================

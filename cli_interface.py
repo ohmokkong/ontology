@@ -68,7 +68,7 @@ class NutritionCLI:
         self.search_manager = None
         
         # CLI 상태
-        self.interactive_mode = False
+        self.is_interactive = False
         self.current_session = {
             'foods': [],
             'exercises': [],
@@ -114,6 +114,9 @@ class NutritionCLI:
         
         # 유틸리티 명령어
         self._add_utility_commands(subparsers)
+        
+        # API 상태 명령어
+        self._add_api_commands(subparsers)
         
         return parser
     
@@ -240,6 +243,14 @@ class NutritionCLI:
         
         # 도움말
         subparsers.add_parser('help', help='도움말 표시')
+    
+    def _add_api_commands(self, subparsers):
+        """API 관련 명령어 추가"""
+        # API 상태 확인
+        subparsers.add_parser('api-status', help='API 연동 상태 확인')
+        
+        # API 설정 가이드
+        subparsers.add_parser('api-guide', help='API 설정 가이드 표시')
     
     def add_food_to_session(self, food_name: str, amount: float, time_str: Optional[str] = None):
         """세션에 음식 추가"""
@@ -386,9 +397,9 @@ class NutritionCLI:
         print("도움말을 보려면 'help'를 입력하세요. 종료하려면 'exit'를 입력하세요.")
         print("=" * 60)
         
-        self.interactive_mode = True
+        self.is_interactive = True
         
-        while self.interactive_mode:
+        while self.is_interactive:
             try:
                 user_input = input("\n> ").strip()
                 
@@ -417,7 +428,7 @@ class NutritionCLI:
             except EOFError:
                 break
         
-        self.interactive_mode = False
+        self.is_interactive = False
     
     def _show_interactive_help(self):
         """대화형 모드 도움말"""
@@ -557,6 +568,10 @@ class NutritionCLI:
             self._handle_cache_command(parsed_args)
         elif parsed_args.command == 'interactive':
             self.interactive_mode()
+        elif parsed_args.command == 'api-status':
+            self._handle_api_status()
+        elif parsed_args.command == 'api-guide':
+            self._handle_api_guide()
         elif parsed_args.command == 'help':
             parser.print_help()
         else:
@@ -716,6 +731,87 @@ class NutritionCLI:
         
         except Exception as e:
             print(f"❌ 캐시 명령어 실행 실패: {e}")
+    
+    def _handle_api_status(self):
+        """API 상태 확인"""
+        try:
+            print("\n🔍 API 연동 상태 확인")
+            print("=" * 40)
+            
+            # 현재 설정 확인
+            food_key = self.config.get('food_api_key', '')
+            exercise_key = self.config.get('exercise_api_key', '')
+            
+            print("📊 API 키 설정 상태:")
+            print(f"  음식 API: {'✅ 설정됨' if food_key else '❌ 미설정'}")
+            if food_key:
+                print(f"    키 길이: {len(food_key)}자")
+                print(f"    키 미리보기: {food_key[:8]}...{food_key[-4:] if len(food_key) > 12 else ''}")
+            
+            print(f"  운동 API: {'✅ 설정됨' if exercise_key else '❌ 미설정'}")
+            if exercise_key:
+                print(f"    키 길이: {len(exercise_key)}자")
+                print(f"    키 미리보기: {exercise_key[:8]}...{exercise_key[-4:] if len(exercise_key) > 12 else ''}")
+            
+            # 전체 상태
+            if food_key and exercise_key:
+                status = "🟢 실제 API 모드"
+                description = "모든 API가 설정되어 실제 데이터를 조회합니다."
+            elif food_key or exercise_key:
+                status = "🟡 부분 API 모드"
+                description = "일부 API만 설정되어 혼합 모드로 작동합니다."
+            else:
+                status = "🔴 시뮬레이션 모드"
+                description = "API 키가 설정되지 않아 시뮬레이션 데이터를 사용합니다."
+            
+            print(f"\n🎯 현재 모드: {status}")
+            print(f"   설명: {description}")
+            
+            if not food_key or not exercise_key:
+                print(f"\n💡 실제 API를 사용하려면:")
+                print(f"   python cli_interface.py api-guide")
+                
+        except Exception as e:
+            print(f"❌ API 상태 확인 실패: {e}")
+    
+    def _handle_api_guide(self):
+        """API 설정 가이드 표시"""
+        guide = """
+🔧 실제 API 연동 설정 가이드
+
+1️⃣ 식약처 식품영양성분 API 키 발급:
+   📍 사이트: https://www.foodsafetykorea.go.kr/api/openApiInfo.do
+   📝 절차: 회원가입 → 로그인 → Open API 신청 → 승인 후 키 발급
+   ⏱️  소요시간: 1-2일 (승인 대기)
+
+2️⃣ 한국건강증진개발원 운동 API 키 발급:
+   📍 사이트: https://www.khealth.or.kr/
+   📝 절차: 개발자 등록 → API 신청 → 승인 후 키 발급
+   ⏱️  소요시간: 2-3일 (승인 대기)
+
+3️⃣ CLI에서 API 키 설정:
+   🔑 음식 API: python cli_interface.py config set-api-key food "your-food-api-key"
+   🏃 운동 API: python cli_interface.py config set-api-key exercise "your-exercise-api-key"
+
+4️⃣ 설정 확인:
+   📊 python cli_interface.py config show
+   🔍 python cli_interface.py api-status
+
+5️⃣ 테스트:
+   🍽️  python cli_interface.py search food "닭가슴살"
+   🏃 python cli_interface.py search exercise "달리기"
+
+💡 참고사항:
+   - API 키가 없어도 시뮬레이션 모드로 모든 기능 사용 가능
+   - 실제 API 사용 시 더 정확하고 다양한 데이터 제공
+   - API 호출 제한이 있을 수 있으니 적절히 사용하세요
+
+❓ 문제 해결:
+   - API 키 오류: 키 형식 및 유효성 확인
+   - 네트워크 오류: 인터넷 연결 및 방화벽 확인
+   - 응답 오류: API 서비스 상태 확인
+        """
+        print(guide)
 
 
 def main():
